@@ -137,7 +137,7 @@ class SyntheticMethodsTest(unittest.TestCase):
         self.assertEqual((approved["verdict"], approved["reorder_indices"]), ("MATCH", [1, 0, 2]))
         membership = evaluate(spec, data, reference_ids=["A", "B", "D"])
         self.assertEqual(membership["reason_code"], "ROW_MEMBERSHIP_MISMATCH")
-        self.assertEqual((membership["details"]["missing_in_data"], membership["details"]["extra_in_data"]), (["D"], ["C"]))
+        self.assertEqual((membership["details"]["missing_in_data"], membership["details"]["missing_in_reference"]), (["D"], ["C"]))
 
 
 class RecordAndCliTest(unittest.TestCase):

@@ -12,7 +12,8 @@ import sys
 from pathlib import Path
 
 from .gate import evaluate
-from .record import append_record, reusable_result
+from .nexus import tip_labels
+from .record import append_record, now_kst, reusable_result
 
 EXIT = {"MATCH": 0, "MISMATCH": 2, "NEEDS_REVIEW": 2, "BLOCK": 3}
 
@@ -24,21 +25,35 @@ def main(argv=None):
     check.add_argument("--spec", required=True, type=Path)
     check.add_argument("--data", required=True, type=Path)
     check.add_argument("--reference-ids", type=Path, help="row_alignment 기준 식별자(한 줄에 하나)")
-    check.add_argument("--approve-reorder-by", help="재정렬을 승인한 사람. --approval-basis와 함께 사람이 직접 입력")
-    check.add_argument("--approval-basis", help="재정렬 승인 근거")
+    check.add_argument("--reference-nexus", type=Path, help="row_alignment 기준: NEXUS 계통수의 끝 이름 목록")
+    check.add_argument("--approve-reorder", action="store_true", help="식별자 기준 재정렬 승인(사람이 직접 입력)")
+    check.add_argument("--approve-normalize", action="append", default=[], metavar="자료값=기준값",
+                       help="제시된 표기 변환 후보 하나를 승인. 여러 번 쓸 수 있음")
+    check.add_argument("--approver", help="승인한 사람")
+    check.add_argument("--approval-basis", help="승인 근거")
     check.add_argument("--record", type=Path, help="판정 기록 JSONL(추가만)")
     args = parser.parse_args(argv)
 
     spec = json.loads(args.spec.read_text(encoding="utf-8"))
     data = args.data.read_bytes()
     reference_ids, reference_sha = None, None
-    if args.reference_ids:
-        raw = args.reference_ids.read_bytes()
+    if args.reference_ids and args.reference_nexus:
+        parser.error("--reference-ids와 --reference-nexus는 하나만 씀")
+    if args.reference_ids or args.reference_nexus:
+        raw = (args.reference_ids or args.reference_nexus).read_bytes()
         reference_sha = hashlib.sha256(raw).hexdigest()
-        reference_ids = [line for line in raw.decode("utf-8").splitlines() if line.strip()]
+        text = raw.decode("utf-8")
+        reference_ids = tip_labels(text) if args.reference_nexus else [line for line in text.splitlines() if line.strip()]
     approvals = {}
-    if args.approve_reorder_by or args.approval_basis:
-        approvals["reorder"] = {"approver": args.approve_reorder_by, "basis": args.approval_basis}
+    if args.approve_reorder or args.approve_normalize:
+        if not (args.approver and args.approval_basis):
+            parser.error("승인에는 --approver와 --approval-basis가 모두 필요")
+        common = {"approver": args.approver, "basis": args.approval_basis, "approved_at_kst": now_kst()}
+        if args.approve_reorder:
+            approvals["reorder"] = dict(common)
+        if args.approve_normalize:
+            pairs = [dict(zip(("from", "to"), item.split("=", 1))) for item in args.approve_normalize]
+            approvals["normalize"] = dict(common, pairs=pairs)
 
     result = evaluate(spec, data, reference_ids=reference_ids, approvals=approvals)
     if args.record:

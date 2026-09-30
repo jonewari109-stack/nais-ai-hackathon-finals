@@ -90,23 +90,63 @@ def _ols(spec, data_sha, fit, info):
                    tolerance=tolerance, details=info)
 
 
+def _approval(approvals, kind, data_sha, reference_sha):
+    """승인자·근거가 모두 있고, 지문이 적혀 있으면 현재 입력과 같을 때만 유효."""
+    approval = approvals.get(kind)
+    if not (isinstance(approval, dict) and approval.get("approver") and approval.get("basis")):
+        return None
+    for key, current in (("data_sha256", data_sha), ("reference_sha256", reference_sha)):
+        if approval.get(key) not in (None, current):
+            raise GateError("APPROVAL_STALE", "승인 뒤 입력이 바뀌어 이전 승인을 쓸 수 없음",
+                            {"approval": kind, "field": key, "approved": approval[key], "current": current})
+    return {"type": kind, "approver": approval["approver"], "basis": approval["basis"],
+            "approved_at_kst": approval.get("approved_at_kst"),
+            "bound_data_sha256": data_sha, "bound_reference_sha256": reference_sha}
+
+
 def _alignment(spec, data_sha, header, selected, reference_ids, approvals):
     if reference_ids is None:
         raise GateError("REFERENCE_MISSING", "기준 식별자 목록이 주어지지 않음")
     column = spec["data_id_column"]
     if column not in header:
         raise GateError("COLUMN_NOT_FOUND", "식별자 열이 자료에 없음", {"columns": [column]})
+    reference_ids = list(reference_ids)
+    reference_sha = hashlib.sha256("\n".join(reference_ids).encode("utf-8")).hexdigest()
     data_ids = [row[column] for _, row in selected]
     report = align.diagnose(data_ids, reference_ids)
-    if not report["membership_ok"]:
-        return _result(spec, data_sha, "BLOCK", "ROW_MEMBERSHIP_MISMATCH", details=report)
-    if data_ids == list(reference_ids):
-        return _result(spec, data_sha, "MATCH", "ROWS_ALIGNED", details=report)
-    approval = approvals.get("reorder")
-    if not (isinstance(approval, dict) and approval.get("approver") and approval.get("basis")):
+    applied = []
+
+    normalize = _approval(approvals, "normalize", data_sha, reference_sha)
+    if normalize:
+        offered = {(c["from"], c["to"]): c for c in report["normalization_candidates"]}
+        requested = approvals["normalize"].get("pairs") or []
+        chosen = [offered.get((p.get("from"), p.get("to"))) for p in requested]
+        if not requested or None in chosen:
+            raise GateError("APPROVAL_NOT_APPLICABLE", "승인한 표기 변환이 제시된 후보에 없음",
+                            {"requested": requested, "candidates": report["normalization_candidates"]})
+        mapping = {c["from"]: c["to"] for c in chosen}
+        data_ids = [mapping.get(v, v) for v in data_ids]
+        normalize["pairs"] = chosen
+        applied.append(normalize)
+        report = dict(align.diagnose(data_ids, reference_ids), before_normalization=report)
+
+    extra = {"details": report, "reference_ids_sha256": reference_sha}
+    if applied:
+        extra["approvals"] = applied
+    if report["status"] == "MEMBERSHIP_MISMATCH":
+        next_action = ("표기 차이 후보를 확인하고 변환을 승인할 수 있음" if report["normalization_candidates"]
+                       else "빠진·남는·중복 식별자를 원자료와 계통수 파일에서 확인")
+        return _result(spec, data_sha, "BLOCK", "ROW_MEMBERSHIP_MISMATCH", next_action=next_action, **extra)
+    if report["status"] == "ALIGNED":
+        return _result(spec, data_sha, "MATCH", "ROWS_ALIGNED", **extra)
+    reorder = _approval(approvals, "reorder", data_sha, reference_sha)
+    if not reorder:
         return _result(spec, data_sha, "BLOCK", "ROW_ORDER_REORDER_REQUIRED",
                        message="구성은 같지만 순서가 다름. 식별자 기준 재정렬을 사람이 승인해야 계산을 이어갈 수 있음",
-                       details=report)
-    return _result(spec, data_sha, "MATCH", "ROWS_REORDERED_WITH_APPROVAL", details=report,
-                   approval={"type": "reorder", "approver": approval["approver"], "basis": approval["basis"]},
-                   reorder_indices=align.reorder_indices(data_ids, reference_ids))
+                       next_action="식별자 기준 재정렬을 승인하시겠어요?", **extra)
+    extra["approvals"] = applied + [reorder]
+    indices = align.reorder_indices(data_ids, reference_ids)
+    mapping = [{"reference_position": i + 1, "id": ref, "data_row": selected[j][0]}
+               for i, (ref, j) in enumerate(zip(reference_ids, indices))]
+    return _result(spec, data_sha, "MATCH", "ROWS_REORDERED_WITH_APPROVAL",
+                   reorder_indices=indices, alignment_table=mapping, **extra)

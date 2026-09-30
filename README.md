@@ -5,7 +5,7 @@
 - 최근 반영: **버전 3 · 조지현** (VERSION = 마지막으로 올린 담당자 번호)
 - 팀 번호: 이영 0 / 이채우 1 / 임도윤 2 / 조지현 3. 번호는 증가하지 않습니다.
 - 공식 저장소: https://github.com/twozero3213-beep/nais-ai-hackathon-finals
-- 현재 범위: 저장소 연결, 자료 검토, 구현·실험·시연·발표 계획, 최소 실행 경로(`evidence_gate/`: 정규 명세 v2 → 결정론적 계산 → 판정 → 기록). 화면·AI 호출·A2 실제 파일 시연·3조건 비교는 미실행입니다.
+- 현재 범위: 저장소 연결, 자료 검토, 구현·실험·시연·발표 계획, 최소 실행 경로(`evidence_gate/`: 정규 명세 v2 → 결정론적 계산 → 판정 → 기록). A2 저자 파일 행 대응 시연(`evidence_gate.demo_a2`). 화면·AI 호출·3조건 비교는 미실행입니다.
 
 ## 본선 작업 기록
 
@@ -19,11 +19,13 @@
 - [차별점·업그레이드·사례 우선순위(JSON)](docs/3_조지현_근거관문_차별점_업그레이드_사례우선순위.json)
 - [구체화 전문가 피드백·전수 검사](docs/3_조지현_구체화_전문가피드백_전수검사.md)
 - [P2 정규 명세·P1 최소 실행 경로 구현 기록](docs/3_조지현_P2P1_구현기록.md)
+- [P5 행 대응 진단·P3 A2 저자 파일 시연 구현 기록](docs/3_조지현_P5P3_A2시연_구현기록.md)
 
 ## 실행
 
 ```bash
 python -m evidence_gate check --spec evidence_gate/examples/penguins_raw_rows.spec.json --data evidence_gate/fixtures/penguins_raw.csv
+python -m evidence_gate.demo_a2 --workdir /tmp/nais-a2 --record /tmp/nais-a2/runs.jsonl
 python -m unittest discover -s tests -t .
 ```
 
